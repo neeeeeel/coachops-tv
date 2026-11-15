@@ -4,7 +4,10 @@
   play a clip with its times. The phone sends the video's address (the phone serves it on the
   Wi-Fi: coachops/lib/tv/clip_server.dart) and the times as "cues" (the same as a shared clip has
   drawn in: coachops/lib/clip_overlay.dart): from each cue's "at" (ms into the video) on, the clock
-  runs from "start" (null: 0.00), held at "cap" (hundredths), with "lines" under it. Play, pause,
+  runs from "start" (null: 0.00), held at "cap" (hundredths), with "lines" under it. The coach's
+  drawings (2026-11-15) come as "drawings": each a picture the video's shape (a PNG the phone serves
+  beside the clip) shown over it from "from" to "to" (ms into the video), sent again as the coach
+  draws, so they appear live. Play, pause,
   seeking and slow motion come from the phone through Google's Cast player framework (CAF).
 
   Hosted over https (Google requires it) at the address registered for CoachOps's Cast app ID:
@@ -21,6 +24,8 @@
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
   body { font-family: "Chakra Petch", sans-serif; font-weight: 700; color: #fff; }
   video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  /* A drawing: the video's shape, so fitted the same way it lies exactly over the picture. */
+  #drawing { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
   #idle {
     position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 2vh; background: #16181b;
@@ -44,6 +49,7 @@
 </head>
 <body>
 <video id="video" playsinline muted></video>
+<img id="drawing" alt="">
 <div id="idle"><div class="name">CoachOps</div><div class="hint">Open a clip on your phone</div></div>
 <div id="times">
   <div class="lcd"><span class="ghost" id="ghost">~~.~~</span><span class="digits" id="clock">0.00</span></div>
@@ -59,8 +65,11 @@
   const ghostEl = document.getElementById('ghost');
   const linesEl = document.getElementById('lines');
   const buffering = document.getElementById('buffering');
+  const drawingEl = document.getElementById('drawing');
   let cues = [];
   let shown = '';
+  let drawings = [];
+  let drawingShown = null;
 
   // Hundredths as the app shows them: 4036 -> "40.36", 18004 -> "3:00.04" (swim_core's formatTime).
   function formatTime(h) {
@@ -86,8 +95,31 @@
     shown = '';
   }
 
+  // The pictures loaded ahead, so one shows the moment it's due.
+  function setDrawings(list) {
+    drawings = (Array.isArray(list) ? list : []).map((d) => {
+      const img = new Image();
+      img.src = d.url;
+      return { from: d.from, to: d.to, url: d.url, img };
+    }).sort((a, b) => a.from - b.from);
+    drawingShown = null;
+  }
+
+  function drawingAt(ms) {
+    let found = null;
+    for (const d of drawings) { if (ms >= d.from && ms < d.to) found = d; }
+    return found;
+  }
+
   function draw() {
     const playing = !!video.currentSrc;
+    const d = playing ? drawingAt(Math.floor(video.currentTime * 1000)) : null;
+    const url = d ? d.url : null;
+    if (url !== drawingShown) {
+      drawingShown = url;
+      if (url) drawingEl.src = url;
+      drawingEl.style.display = url ? 'block' : 'none';
+    }
     idle.style.display = playing ? 'none' : 'flex';
     times.style.display = playing && cues.length ? 'block' : 'none';
     if (playing && cues.length) {
@@ -115,6 +147,7 @@
   player.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, (request) => {
     setCues(request.customData && request.customData.cues);
     buffering.style.display = 'none';
+    setDrawings(request.customData && request.customData.drawings);
     return request;
   });
   player.addEventListener(cast.framework.events.EventType.BUFFERING, (e) => {
@@ -132,11 +165,13 @@
       video.removeAttribute('src');
       video.load();
       setCues([]);
+      setDrawings([]);
     }
   });
   context.addCustomMessageListener(NS, (e) => {
     const m = e.data || {};
     if (m.type === 'cues') setCues(m.cues);
+    if (m.type === 'drawings') setDrawings(m.drawings);
   });
   // Stays up between clips; goes once the phone disconnects.
   context.addEventListener(cast.framework.system.EventType.SENDER_DISCONNECTED, () => {
