@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<!--
+  CoachOps on a Chromecast (2026-11-15, Niel): the TV page a phone starts on the Chromecast to
+  play a clip with its times. The phone sends the video's address (the phone serves it on the
+  Wi-Fi: coachops/lib/tv/clip_server.dart) and the times as "cues" (the same as a shared clip has
+  drawn in: coachops/lib/clip_overlay.dart): from each cue's "at" (ms into the video) on, the clock
+  runs from "start" (null: 0.00), held at "cap" (hundredths), with "lines" under it. Play, pause,
+  seeking and slow motion come from the phone through Google's Cast player framework (CAF).
+
+  Hosted over https (Google requires it) at the address registered for CoachOps's Cast app ID:
+  docs/tv.md. Nothing here is secret; no swimmer's name is ever stored or sent anywhere by it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CoachOps</title>
+<script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+<style>
+  @font-face { font-family: "DSEG14"; src: url("fonts/DSEG14Classic-Regular.ttf"); }
+  @font-face { font-family: "Chakra Petch"; src: url("fonts/ChakraPetch-Bold.ttf"); font-weight: 700; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { font-family: "Chakra Petch", sans-serif; font-weight: 700; color: #fff; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #idle {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2vh; background: #16181b;
+  }
+  #idle .name { font-size: 9vh; letter-spacing: .05em; }
+  #idle .hint { font-size: 3.4vh; color: #d0dae2; font-weight: 400; }
+  #times { position: absolute; left: 3vh; top: 3vh; display: none; }
+  /* The LCD panel, as the app's LcdPanel: pale window, charcoal digits, unlit segments behind. */
+  .lcd {
+    position: relative; display: inline-block; background: #e4ecf2; border: .25vh solid #d0dae2;
+    border-radius: 1.6vh; padding: 1.4vh 2.2vh; font-family: "DSEG14"; font-size: 7vh; line-height: 1;
+  }
+  .lcd .ghost { color: #d0dae2; }
+  .lcd .digits { position: absolute; left: 2.2vh; top: 1.4vh; color: #1f2124; }
+  #lines { margin-top: 1.5vh; }
+  #lines div { font-size: 4vh; line-height: 1.25; text-shadow: 0 0 1vh #000, 0 0 .4vh #000; white-space: nowrap; }
+  #buffering {
+    position: absolute; right: 3vh; bottom: 3vh; font-size: 3vh; color: #d0dae2; display: none;
+  }
+</style>
+</head>
+<body>
+<video id="video" playsinline muted></video>
+<div id="idle"><div class="name">CoachOps</div><div class="hint">Open a clip on your phone</div></div>
+<div id="times">
+  <div class="lcd"><span class="ghost" id="ghost">~~.~~</span><span class="digits" id="clock">0.00</span></div>
+  <div id="lines"></div>
+</div>
+<div id="buffering">Loading…</div>
+<script>
+  const NS = 'urn:x-cast:com.neeeeeel.coachops';
+  const video = document.getElementById('video');
+  const idle = document.getElementById('idle');
+  const times = document.getElementById('times');
+  const clockEl = document.getElementById('clock');
+  const ghostEl = document.getElementById('ghost');
+  const linesEl = document.getElementById('lines');
+  const buffering = document.getElementById('buffering');
+  let cues = [];
+  let shown = '';
+
+  // Hundredths as the app shows them: 4036 -> "40.36", 18004 -> "3:00.04" (swim_core's formatTime).
+  function formatTime(h) {
+    const m = Math.floor(h / 6000), rest = h % 6000, s = Math.floor(rest / 100);
+    const hs = String(rest % 100).padStart(2, '0');
+    return m > 0 ? `${m}:${String(s).padStart(2, '0')}.${hs}` : `${s}.${hs}`;
+  }
+
+  function cueAt(ms) {
+    let found = null;
+    for (const c of cues) { if (c.at <= ms) found = c; else break; }
+    return found || cues[0] || null;
+  }
+
+  function clockAt(c, ms) {
+    if (!c || c.start == null) return 0;
+    const t = ms < c.start ? 0 : Math.floor((ms - c.start) / 10);
+    return c.cap != null && t > c.cap ? c.cap : t;
+  }
+
+  function setCues(list) {
+    cues = Array.isArray(list) ? list.slice().sort((a, b) => a.at - b.at) : [];
+    shown = '';
+  }
+
+  function draw() {
+    const playing = !!video.currentSrc;
+    idle.style.display = playing ? 'none' : 'flex';
+    times.style.display = playing && cues.length ? 'block' : 'none';
+    if (playing && cues.length) {
+      const ms = Math.floor(video.currentTime * 1000);
+      const c = cueAt(ms);
+      const clock = formatTime(clockAt(c, ms));
+      const lines = c ? c.lines || [] : [];
+      const key = clock + '\n' + lines.join('\n');
+      if (key !== shown) {
+        shown = key;
+        clockEl.textContent = clock;
+        // In DSEG14 "~" lights every segment; ":" and "." keep their places (LcdText's ghost).
+        ghostEl.textContent = clock.replace(/[^:.]/g, '~');
+        linesEl.replaceChildren(...lines.map((l) => { const d = document.createElement('div'); d.textContent = l; return d; }));
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+
+  const context = cast.framework.CastReceiverContext.getInstance();
+  const player = context.getPlayerManager();
+  player.setMediaElement(video);
+
+  player.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, (request) => {
+    setCues(request.customData && request.customData.cues);
+    return request;
+  });
+  player.addEventListener(cast.framework.events.EventType.BUFFERING, (e) => {
+    buffering.style.display = e.isBuffering ? 'block' : 'none';
+  });
+  // The clip off the TV (the phone left it): back to waiting for the next.
+  player.addEventListener(cast.framework.events.EventType.MEDIA_FINISHED, (e) => {
+    if (e.endedReason === 'STOPPED' || e.endedReason === 'INTERRUPTED') {
+      video.removeAttribute('src');
+      video.load();
+      setCues([]);
+    }
+  });
+  context.addCustomMessageListener(NS, (e) => {
+    const m = e.data || {};
+    if (m.type === 'cues') setCues(m.cues);
+  });
+  // Stays up between clips; goes once the phone disconnects.
+  context.addEventListener(cast.framework.system.EventType.SENDER_DISCONNECTED, () => {
+    if (context.getSenders().length === 0) context.stop();
+  });
+  context.start({
+    disableIdleTimeout: true,
+    customNamespaces: { [NS]: cast.framework.system.MessageType.JSON },
+    // Slow motion: CAF passes the phone's speed to the player (supportedCommands).
+    supportedCommands: cast.framework.messages.Command.ALL_BASIC_MEDIA | cast.framework.messages.Command.PLAYBACK_RATE,
+  });
+</script>
+</body>
+</html>
