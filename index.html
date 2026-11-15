@@ -114,10 +114,17 @@
 
   player.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, (request) => {
     setCues(request.customData && request.customData.cues);
+    buffering.style.display = 'none';
     return request;
   });
   player.addEventListener(cast.framework.events.EventType.BUFFERING, (e) => {
+    buffering.textContent = 'Loading…';
     buffering.style.display = e.isBuffering ? 'block' : 'none';
+  });
+  // Never a silent black screen: the TV couldn't fetch or play the clip from the phone.
+  player.addEventListener(cast.framework.events.EventType.ERROR, () => {
+    buffering.textContent = 'The clip didn\'t load from the phone';
+    buffering.style.display = 'block';
   });
   // The clip off the TV (the phone left it): back to waiting for the next.
   player.addEventListener(cast.framework.events.EventType.MEDIA_FINISHED, (e) => {
