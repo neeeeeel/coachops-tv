@@ -26,12 +26,24 @@
   video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
   /* A drawing: the video's shape, so fitted the same way it lies exactly over the picture. */
   #drawing { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
+  /* Waiting for a clip (2026-11-16, Niel): the brand as on the Play feature graphic, the mark with
+     its pace clock turning once a minute, the lane rope along the bottom; it fades in. */
+  @font-face { font-family: "Chakra Petch"; src: url("fonts/ChakraPetch-Medium.ttf"); font-weight: 500; }
   #idle {
-    position: absolute; inset: 0; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 2vh; background: #16181b;
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse 60% 70% at 34% 48%, #1d2a3d 0%, #16181b 70%);
+    animation: fade 1.2s ease-out both;
   }
-  #idle .name { font-size: 9vh; letter-spacing: .05em; }
-  #idle .hint { font-size: 3.4vh; color: #d0dae2; font-weight: 400; }
+  #idle .brand { display: flex; align-items: center; gap: 7vh; margin-bottom: 4vh; }
+  #idle .mark { height: 52vh; animation: rise 1.4s ease-out both; }
+  #idle .name { font-size: 15vh; line-height: 1; letter-spacing: .01em; animation: rise 1.4s .25s ease-out both; }
+  #idle .ready { font-size: 5vh; font-weight: 500; color: #b4bec7; margin-top: 4vh; animation: rise 1.4s .5s ease-out both; }
+  #idle .hint { font-size: 3.2vh; font-weight: 500; color: #7f8a94; margin-top: 2.2vh; max-width: 40vw; line-height: 1.35;
+    animation: rise 1.4s .75s ease-out both; }
+  #idle .rope { position: absolute; left: 0; right: 0; bottom: 0; height: 2.6vh; display: flex; }
+  #idle .rope span { flex: 1; }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes rise { from { opacity: 0; transform: translateY(3vh); } }
   #times { position: absolute; left: 3vh; top: 3vh; display: none; }
   /* The LCD panel, as the app's LcdPanel: pale window, charcoal digits, unlit segments behind. */
   .lcd {
@@ -50,7 +62,17 @@
 <body>
 <video id="video" playsinline muted></video>
 <img id="drawing" alt="">
-<div id="idle"><div class="name">CoachOps</div><div class="hint">Open a clip on your phone</div></div>
+<div id="idle">
+  <div class="brand">
+    <img class="mark" src="coachops-mark.svg" alt="">
+    <div>
+      <div class="name">CoachOps</div>
+      <div class="ready">Ready for your clips</div>
+      <div class="hint">Open a clip on your phone and it plays here, with its times.</div>
+    </div>
+  </div>
+  <div class="rope" id="rope"></div>
+</div>
 <div id="times">
   <div class="lcd"><span class="ghost" id="ghost">~~.~~</span><span class="digits" id="clock">0.00</span></div>
   <div id="lines"></div>
@@ -66,6 +88,12 @@
   const linesEl = document.getElementById('lines');
   const buffering = document.getElementById('buffering');
   const drawingEl = document.getElementById('drawing');
+  // The lane rope as the app's title bar draws it (RopeStrip in swim_core's brand.dart).
+  for (let n = 1; n <= 25; n++) {
+    const f = document.createElement('span');
+    f.style.background = n <= 5 || n > 20 ? '#E0262B' : n === 10 || n === 16 ? '#FFC400' : (n - 1) % 2 === 0 ? '#1F6FD1' : '#FFFFFF';
+    document.getElementById('rope').appendChild(f);
+  }
   let cues = [];
   let shown = '';
   let drawings = [];
